@@ -44,7 +44,9 @@ mkdir ~/weaver
 ### 2. Paste this as your first message
 
 ```sh
-Hello, world. Please clone `https://github.com/ethanbeard/weaver` into the current directory, then tell me to type `/clear` to reload the session.
+Hello, world. Please clone `https://github.com/ethanbeard/weaver`
+into the current directory, then tell me to
+type `/clear` to reload the session.
 ```
 
 The "Hello, world" opener seeds a pleasant auto-title on the session.
