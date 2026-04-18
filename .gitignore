@@ -1,0 +1,12 @@
+# macOS
+.DS_Store
+
+# Claude Code per-user state — don't travel with the workspace
+.claude/settings.local.json
+
+# Runtime artifacts created by the install-launchagent skill
+.claude/launchd/
+
+# Daily memory journal — private, per-machine
+memory/*.md
+!memory/.gitkeep
