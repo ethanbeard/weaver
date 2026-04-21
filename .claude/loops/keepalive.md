@@ -1,6 +1,7 @@
 ---
 cron: "7 3 * * *"
 enabled: true
+durable: true
 description: Daily renewal — runs /loops sync to keep all loops alive past the 7-day cron expiry
 ---
 

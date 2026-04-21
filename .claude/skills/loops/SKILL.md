@@ -24,6 +24,7 @@ loop file and let `sync` wire it up.
 ---
 cron: "<5-field cron expression>"
 enabled: true
+durable: false
 description: <one-line description>
 ---
 
@@ -32,7 +33,11 @@ description: <one-line description>
 
 The filename (minus `.md`) is the loop's name. `cron` accepts standard
 5-field cron expressions. `enabled: true` means `sync` should register
-it; `false` means skip.
+it; `false` means skip. `durable` is optional and defaults to `false` —
+set it to `true` to persist the cron to `.claude/scheduled_tasks.json`
+so it survives session restarts. Only `keepalive` ships with
+`durable: true` by default; leave user loops non-durable unless there's
+a specific reason to pin them.
 
 ## Argument parsing
 
@@ -64,6 +69,7 @@ don't expire. If it's missing, recreate it with default content:
 ---
 cron: "7 3 * * *"
 enabled: true
+durable: true
 description: Daily renewal — runs /loops sync to keep all loops alive past the 7-day cron expiry
 ---
 
@@ -128,7 +134,13 @@ For each loop to register, build the prompt:
 Where `NAME` is the filename minus `.md`, and `TIMESTAMP` is the current
 moment in ISO 8601 UTC (e.g., `2026-04-16T10:30:00Z`). Use `date -u +%Y-%m-%dT%H:%M:%SZ`.
 
-Then call `CronCreate(cron=<from frontmatter>, recurring=true, prompt=<assembled>)`.
+Then call `CronCreate(cron=<from frontmatter>, recurring=true, durable=<from frontmatter, default false>, prompt=<assembled>)`.
+
+`durable: true` persists the cron to `.claude/scheduled_tasks.json` so
+it survives session restarts. Only `keepalive` is durable by default —
+it's the load-bearing loop, and we want it to survive a crash/restart
+without waiting for the next session-start sync to re-register it.
+User loops are ephemeral; keepalive resurrects them on the next sync.
 
 ### Step 6: Report (silent by default)
 
@@ -210,10 +222,13 @@ before proceeding.
 
 ## Notes
 
-- **Loops are session-scoped.** If the Claude Code session dies, the
-  registered crons die too. `--resume` restores them if they haven't
-  expired. Past 7 days, everything is gone and the session-start sync
-  in `AGENTS.md` rebuilds the state from the registry.
+- **Loops are session-scoped by default.** If the Claude Code session
+  dies, the registered crons die too. `--resume` restores them if they
+  haven't expired. Past 7 days, everything is gone and the session-start
+  sync in `AGENTS.md` rebuilds the state from the registry. Exception:
+  loops with `durable: true` persist to `.claude/scheduled_tasks.json`
+  and survive restarts within the 7-day window. Only `keepalive` is
+  durable by default.
 - **The keepalive is special but not special-cased.** It's just another
   loop file. The only bit of special logic is bootstrapping it if missing
   (step 1 above) — because without it, the whole system can't self-heal.
