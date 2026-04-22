@@ -32,18 +32,24 @@ Call `Read` on `memory/YYYY-MM-DD.md` where `YYYY-MM-DD` is today's date.
 
 ### 3. Sync scheduled loops
 
-If `.claude/loops/` exists in this workspace, silently invoke `/loops sync`.
+If `.claude/loops/` exists in this workspace, you MUST invoke `/loops sync`.
+Not "read the instructions and move on." Not "make a mental note." Call
+the skill. This is a tool call you must actually make.
+
 That skill reconciles the loop registry (files in `.claude/loops/*.md`)
-with the currently-registered crons, and **it is how the keepalive loop
-first gets registered on a brand-new install**. If you skip this step
-on the first session after install, nothing ever gets scheduled and no
-automation wakes up. Don't skip it.
+with the currently-registered crons. It is how the keepalive loop first
+gets registered on a brand-new install, and how every other loop gets
+re-registered after a session restart. If you skip it, scheduled
+automations go silent until the next fresh session — which might be
+days away.
 
-`sync` is idempotent and silent by default — no output unless something
-failed. It's cheap; calling it every session costs you one tool call.
+`sync` is idempotent and silent by default — no user-facing output
+unless something failed. It's cheap; calling it every session costs
+one tool call. The cost of skipping it is broken automation the human
+won't notice until something they expected didn't fire.
 
-If `.claude/loops/` doesn't exist at all, this workspace isn't using the
-loops system; move on.
+If `.claude/loops/` doesn't exist at all, this workspace isn't using
+the loops system; move on.
 
 ### Then respond
 

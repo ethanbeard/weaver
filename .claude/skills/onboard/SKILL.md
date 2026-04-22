@@ -119,18 +119,27 @@ When this stage resolves (in any branch), write a dotfile to mark it:
 touch .claude/.capability-offered
 ```
 
-## Stage 2 — close out (write the completion flag)
+## Stage 2 — close out (write the completion flag + bootstrap loops)
 
-Once persona + user + capability offer are all satisfied, write the
-onboarded flag:
+Once persona + user + capability offer are all satisfied:
 
-```bash
-date -u +"%Y-%m-%dT%H:%M:%SZ" > .claude/.onboarded
-```
+1. **Register the loops.** Silently invoke `/loops sync`. This is what
+   actually bootstraps the `keepalive` cron on a fresh install — the
+   session-start check in `CLAUDE.md` is also supposed to do it, but
+   when onboarding takes over the first turn it sometimes gets skipped.
+   Doing it here guarantees the workspace's automations are live before
+   the human's first real message. Sync is idempotent and silent by
+   default; no output unless something failed.
 
-Then tell the human something close to:
+2. **Write the onboarded flag:**
 
-> "All set. Future sessions skip straight into the conversation."
+   ```bash
+   date -u +"%Y-%m-%dT%H:%M:%SZ" > .claude/.onboarded
+   ```
+
+3. **Tell the human** something close to:
+
+   > "All set. Future sessions skip straight into the conversation."
 
 Do not delete any files. The flag's existence is what gates future
 invocations; no self-mutation required.

@@ -33,11 +33,38 @@ description: <one-line description>
 
 The filename (minus `.md`) is the loop's name. `cron` accepts standard
 5-field cron expressions. `enabled: true` means `sync` should register
-it; `false` means skip. `durable` is optional and defaults to `false` —
-set it to `true` to persist the cron to `.claude/scheduled_tasks.json`
-so it survives session restarts. Only `keepalive` ships with
-`durable: true` by default; leave user loops non-durable unless there's
-a specific reason to pin them.
+it; `false` means skip.
+
+Optional frontmatter fields:
+
+- `durable: true` — hint to the harness to persist the cron to
+  `.claude/scheduled_tasks.json`. Currently gated behind a feature flag
+  in Claude Code (`tengu_kairos_cron_durable`) and silently downgraded
+  to session-only in most installs. Setting it doesn't hurt and will
+  auto-upgrade behavior when/if the flag rolls out. Only `keepalive`
+  ships with it by default.
+- `debounce_seconds: <n>` — window in seconds during which a duplicate
+  fire is suppressed. Defaults to `60`. See the multi-session dedup
+  section below.
+- `last_fired: <ISO UTC timestamp>` — agent-managed. Written by the
+  loop's own preamble on each successful fire; read by subsequent fires
+  to suppress duplicates. Don't edit this by hand.
+
+## Multi-session dedup
+
+Claude Code's crons are session-scoped. If two sessions are open against
+the same workspace, each will register its own copy of every loop and
+fire them independently — you'd see a morning briefing twice.
+
+The dedup mechanism: every registered loop's prompt starts with a
+preamble that reads the loop's own md file, checks `last_fired`, and
+bails silently if it's within `debounce_seconds` of now. Only the first
+session to win the race writes `last_fired` and proceeds with the work;
+the rest see the fresh timestamp and end their turn silently.
+
+This is a best-effort debounce, not a hard lock. A race window exists
+if two sessions read-then-write within the same ~100ms. For typical
+fire intervals (30+ minutes) the race is harmless.
 
 ## Argument parsing
 
@@ -124,23 +151,47 @@ For each name in the union of registry and CronList:
 
 ### Step 5: Register loops
 
-For each loop to register, build the prompt:
+For each loop to register, build the prompt with a dedup preamble + the
+file body:
 
 ```
 <loop:NAME:TIMESTAMP>
+Multi-session dedup — do this first, before anything else:
+
+1. Read `.claude/loops/NAME.md`.
+2. Look at `last_fired` in the frontmatter. If it exists and is within
+   the last DEBOUNCE seconds of now (DEBOUNCE = the `debounce_seconds`
+   frontmatter field, default 60), end this turn silently. Another
+   session already claimed this fire — producing any output would be
+   duplicate noise.
+3. Otherwise, update the frontmatter: set `last_fired` to the current
+   ISO 8601 UTC timestamp (e.g., `last_fired: 2026-04-21T17:30:00Z`).
+   Use `date -u +%Y-%m-%dT%H:%M:%SZ` to generate it. Write the file
+   back before proceeding.
+
+Then execute:
+
 <body from the file>
 ```
 
-Where `NAME` is the filename minus `.md`, and `TIMESTAMP` is the current
-moment in ISO 8601 UTC (e.g., `2026-04-16T10:30:00Z`). Use `date -u +%Y-%m-%dT%H:%M:%SZ`.
+Where `NAME` is the filename minus `.md`, `TIMESTAMP` is the current
+moment in ISO 8601 UTC (e.g., `2026-04-16T10:30:00Z`) via
+`date -u +%Y-%m-%dT%H:%M:%SZ`, and `DEBOUNCE` is the literal value from
+the loop's `debounce_seconds` frontmatter (or `60` if not set).
 
 Then call `CronCreate(cron=<from frontmatter>, recurring=true, durable=<from frontmatter, default false>, prompt=<assembled>)`.
 
-`durable: true` persists the cron to `.claude/scheduled_tasks.json` so
-it survives session restarts. Only `keepalive` is durable by default —
-it's the load-bearing loop, and we want it to survive a crash/restart
-without waiting for the next session-start sync to re-register it.
-User loops are ephemeral; keepalive resurrects them on the next sync.
+**Why the dedup preamble:** Claude Code's crons are session-scoped, so
+multiple sessions in the same workspace each register their own copy
+and fire independently. The preamble makes every fire read-check-write
+the loop's own md file — only the first session to win the race
+proceeds; the rest see the fresh `last_fired` and bail. This is
+best-effort (small race window), not a hard lock.
+
+**Why `durable`** is passed: it's a hint to the harness for restart
+survival. Currently ignored in most installs (gated behind a
+GrowthBook flag) but costs nothing to include — auto-upgrades behavior
+if the flag ever ships. Only `keepalive` is durable by default.
 
 ### Step 6: Report (silent by default)
 
@@ -158,7 +209,12 @@ Show the human what's registered.
 
 1. Read all `.claude/loops/*.md` files.
 2. Call `CronList`, filter to loop-managed entries.
-3. Render as a table:
+3. **Self-heal if needed.** If `keepalive.md` has `enabled: true` but
+   no matching cron is registered, the session-start sync was skipped.
+   Run `sync` automatically before rendering the table — don't just
+   flag the discrepancy to the human. They asked "what's running," not
+   "what's broken." Fix it, then show the result.
+4. Render as a table:
 
 ```
 Loop            cron              enabled   registered   next fire       age
@@ -222,13 +278,19 @@ before proceeding.
 
 ## Notes
 
-- **Loops are session-scoped by default.** If the Claude Code session
-  dies, the registered crons die too. `--resume` restores them if they
-  haven't expired. Past 7 days, everything is gone and the session-start
-  sync in `AGENTS.md` rebuilds the state from the registry. Exception:
-  loops with `durable: true` persist to `.claude/scheduled_tasks.json`
-  and survive restarts within the 7-day window. Only `keepalive` is
-  durable by default.
+- **Loops are session-scoped.** If the Claude Code session dies, the
+  registered crons die too. `--resume` restores them if they haven't
+  expired. Past 7 days, everything is gone and the session-start sync
+  in `AGENTS.md` rebuilds the state from the registry. `durable: true`
+  is supposed to persist crons to `.claude/scheduled_tasks.json` but is
+  currently gated and typically silently downgraded to session-scoped;
+  don't rely on it for correctness.
+- **Multi-session coexistence.** Multiple Claude Code sessions against
+  the same workspace is supported. Each session independently registers
+  its copy of every loop, but the dedup preamble in each registered
+  prompt ensures only one session actually does the work per fire. If
+  you want a loop to NEVER dedupe (i.e., fire once per session on
+  purpose), set `debounce_seconds: 0` in its frontmatter.
 - **The keepalive is special but not special-cased.** It's just another
   loop file. The only bit of special logic is bootstrapping it if missing
   (step 1 above) — because without it, the whole system can't self-heal.
